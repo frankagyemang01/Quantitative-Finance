@@ -1,0 +1,121 @@
+---
+title: "House_market_pred"
+author: Frank Agyemang
+date: "2026-05-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+The goal of this project is to provide me with the opportunity to apply my knowledge and skills on real world data science projects and quip myself for the emerging market.
+
+Data on housing in Ames, Iowa were collected. Ask a home buyer to describe their dream house, and they probably won't begin with the height of the basement ceiling or the proximity to an east-west railroad. But this playground competition's dataset proves that much more influences price negotiations than the number of bedrooms or a white-picket fence.
+
+With 79 explanatory variables describing (almost) every aspect of residential homes in Ames, Iowa, this competition challenges you to predict the final price of each home.
+
+```{r, warning=FALSE}
+## Read in sample submission
+samp_sub <- read.csv("sample_submission.csv")
+
+library(GGally)
+library(ggplot2)
+```
+
+We read in the train data, carefully inspected each predictor variable and its description. There were 80 predictor variables in total. As with most data analysis, the first step is to clean and prepare the data. This means ensuring that missing values are removed where necessary and in some cases, imputed. Also, the type of variable for each predictor variable is ensured.
+
+Based on the description of the data, I decided to fill NAs with None where appropriate since those are not just missing values and hvae real meaning.
+
+```{r}
+## Read in train data
+train_data_ia <- read.csv("train.csv")
+
+## Use summary to get an idea about the train data
+#summary(train_data_ia)
+
+## Counting missing values in each column
+#colSums(is.na(train_data_ia))
+
+```
+
+
+```{r}
+## Imputation or re-coding missing values
+vars_impute <- c("Alley", "FireplaceQu", "PoolQC", "Fence", "MiscFeature", "BsmtQual", "BsmtCond", "BsmtExposure", "BsmtFinType1", "BsmtFinType2", "GarageType", "GarageFinish", "GarageQual", "GarageCond")
+
+train_data_ia[vars_impute] <- lapply(train_data_ia[vars_impute], function(x) {
+  x[is.na(x)] <- "None"
+  x
+})
+
+## Treating categorical variables as factors
+qual_var <- c(3, 6:12, 13:17, 22:26, 28:34, 36, 40:43, 54, 56,
+              58:59, 61, 64:66, 73:75, 79:80)
+
+train_data_ia[qual_var] <- lapply(train_data_ia[qual_var], as.factor)
+```
+
+
+```{r}
+## Exploratory data analysis
+
+response <- "SalePrice"
+predictors <- setdiff(names(train_data_ia), response)
+# Identify quantitative variables
+quant_predictors <- predictors[sapply(train_data_ia[predictors], is.numeric)]
+# Identify qualitative variables
+qual_predictors <- predictors[sapply(train_data_ia[predictors], function(x) {
+  is.factor(x) || is.character(x)
+})]
+
+# Make scatter plots for each quantitative predictor
+for (var in quant_predictors) {
+  p <- ggplot(train_data_ia, aes(x = .data[[var]], y = .data[[response]])) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(method = "lm", se = FALSE) +
+    labs(
+      title = paste(response, "vs", var),
+      x = var,
+      y = response
+    ) +
+    theme_minimal()
+  
+  print(p)
+}
+
+```
+
+
+```{r}
+## Understanding relationship among quantitative variables
+# Create PCA data
+pca_data <- train_data_ia[, quant_predictors]
+pca_data <- na.omit(pca_data)
+
+## Run PCA
+pca_result <- prcomp(pca_data, center = TRUE, scale. = TRUE)
+pca_result_10 <- pca_result$x[, 0:10]
+summary(pca_result)$importance[,1:10]
+pca_result$rotation
+
+
+library(factoextra)
+
+fviz_pca_biplot(
+  pca_result,
+  repel = TRUE,
+  col.var = "blue",
+  col.ind = "gray"
+)
+```
+
+## Prediction
+
+```{r, warning=FALSE}
+library(caret)
+library(randomForest)
+```
+
