@@ -1,0 +1,461 @@
+---
+title: "House_market_pred"
+author: Frank Agyemang
+date: "2026-05-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+The goal of this project is to provide me with the opportunity to apply my knowledge and skills on real world data science projects and quip myself for the emerging market.
+
+Data on housing in Ames, Iowa were collected. Ask a home buyer to describe their dream house, and they probably won't begin with the height of the basement ceiling or the proximity to an east-west railroad. But this playground competition's dataset proves that much more influences price negotiations than the number of bedrooms or a white-picket fence.
+
+With 79 explanatory variables describing (almost) every aspect of residential homes in Ames, Iowa, this competition challenges you to predict the final price of each home.
+
+```{r, warning=FALSE}
+## Read in sample submission
+samp_sub <- read.csv("sample_submission.csv")
+
+library(GGally)
+library(ggplot2)
+library(caret)
+library(randomForest)
+library(dplyr)
+```
+
+We read in the train data, carefully inspected each predictor variable and its description. There were 80 predictor variables in total. As with most data analysis, the first step is to clean and prepare the data. This means ensuring that missing values are removed where necessary and in some cases, imputed. Also, the type of variable for each predictor variable is ensured.
+
+Based on the description of the data, I decided to fill NAs with None where appropriate since those are not just missing values and have real meaning.
+
+```{r}
+## Read in train data
+train_data_ia <- read.csv("train.csv")
+test_data_ia <- read.csv("test.csv")
+
+test_data_ia$MasVnrType[is.na(test_data_ia$MasVnrType)] <- "None"
+test_data_ia$Utilities[is.na(test_data_ia$Utilities)] <- "AllPub"
+test_data_ia$Exterior1st[is.na(test_data_ia$Exterior1st)] <- "WdShing" 
+test_data_ia$Exterior2nd[is.na(test_data_ia$Exterior2nd)] <- "Wd Shng" 
+test_data_ia$KitchenQual[is.na(test_data_ia$KitchenQual)] <- "TA"
+test_data_ia$Functional[is.na(test_data_ia$Functional)] <- "Typ"
+test_data_ia$SaleType[is.na(test_data_ia$SaleType)] <- "WD"
+test_data_ia$MSZoning[is.na(test_data_ia$MSZoning)] <- "RM"
+
+## Use summary to get an idea about the train data
+#summary(train_data_ia)
+#summary(test_data_ia)
+
+## Counting missing values in each column
+#colSums(is.na(train_data_ia))
+
+```
+
+Next, all character variables were converted to factors. Under each variable, we are able to identify the factor levels and this helps in determining how each of these factor levels affect the prices of homes in Ames, Iowa.
+
+```{r}
+## Imputation or re-coding missing values
+vars_impute <- c("Alley", "FireplaceQu", "PoolQC", "Fence", "MiscFeature", "BsmtQual", "BsmtCond", "BsmtExposure", "BsmtFinType1", "BsmtFinType2", "GarageType", "GarageFinish", "GarageQual", "GarageCond")
+
+train_data_ia[vars_impute] <- lapply(train_data_ia[vars_impute], function(x) {
+  x[is.na(x)] <- "None"
+  x
+})
+
+
+
+test_data_ia[vars_impute] <- lapply(test_data_ia[vars_impute], function(x) {
+  x[is.na(x)] <- "None"
+  x
+})
+
+
+## Treating categorical variables as factors
+qual_var <- c(3, 6:12, 13:17, 22:26, 28:34, 36, 40:43, 54, 56,
+              58:59, 61, 64:66, 73:75, 79:80)
+
+train_data_ia[qual_var] <- lapply(train_data_ia[qual_var], as.factor)
+test_data_ia[qual_var] <- lapply(test_data_ia[qual_var], as.factor)
+```
+
+For most of the quantitative data, I decided not to impute any data in the training set because there were only few missing values and thus, removing those observations would not affect the accuracy of prediction. Nevertheless, for the test set, I imputed the data using mean because all observations in the test set need to be predicted. 
+
+```{r}
+## Exploratory data analysis
+response <- "SalePrice"
+predictors <- setdiff(names(train_data_ia), response)
+
+# Identify quantitative variables
+quant_predictors <- predictors[sapply(train_data_ia[predictors], is.numeric)]
+
+# Identify qualitative variables
+qual_predictors <- predictors[sapply(train_data_ia[predictors], function(x) {
+  is.factor(x) || is.character(x)
+})]
+
+## Impute the train data
+cluster_vars_train <- quant_predictors
+
+cluster_data_train <- train_data_ia %>%
+  select(all_of(cluster_vars_train))
+
+# Temporary median imputation only for clustering variables
+cluster_data_temp <- cluster_data_train %>%
+  mutate(across(
+    everything(),
+    ~ ifelse(is.na(.x), median(.x, na.rm = TRUE), .x)
+  ))
+
+# Scale variables before clustering
+cluster_data_scaled_train <- scale(cluster_data_temp)
+
+set.seed(124)
+
+k <- 6
+
+km_model <- kmeans(
+  cluster_data_scaled_train,
+  centers = k,
+  nstart = 25
+)
+
+train_data_ia$cluster <- factor(km_model$cluster)
+
+## Imputing values using cluster medians
+
+train_data_ia_imputed <- train_data_ia
+
+for (var in quant_predictors) {
+  
+  train_data_ia_imputed <- train_data_ia_imputed %>%
+    group_by(cluster) %>%
+    mutate(
+      "{var}" := ifelse(
+        is.na(.data[[var]]),
+        median(.data[[var]], na.rm = TRUE),
+        .data[[var]]
+      )
+    ) %>%
+    ungroup()
+}
+
+## Imputing clusters that may have missing values
+
+for (var in quant_predictors) {
+  
+  overall_median <- median(train_data_ia_imputed[[var]], na.rm = TRUE)
+  
+  train_data_ia_imputed[[var]][is.na(train_data_ia_imputed[[var]])] <- overall_median
+}
+
+# Optional: remove cluster column after imputation
+train_data_ia_imputed <- train_data_ia_imputed %>%
+  select(-cluster)
+
+train_data_ia <- train_data_ia_imputed
+```
+
+
+```{r}
+## Understanding relationship among quantitative variables
+# Create PCA data
+pca_data <- train_data_ia[, quant_predictors]
+pca_data <- na.omit(pca_data)
+
+## Run PCA
+pca_result <- prcomp(pca_data, center = TRUE, scale. = TRUE)
+pca_result_10 <- pca_result$x[, 0:10]
+#summary(pca_result)$importance[,1:10]
+#pca_result$rotation
+
+
+library(factoextra)
+
+fviz_pca_biplot(
+  pca_result,
+  repel = TRUE,
+  col.var = "blue",
+  col.ind = "gray"
+)
+
+
+```
+
+For the test data, our method of imputation was the K-nearest neighbor clustering where we used the median of each cluster. I thought this would be a more reasonable method of imputation since house prices for houses with similar amenities and features tend to be priced about the same. Also, with a data set like the one used for prediction, using the median reduces the mean square errors of predicted observations.
+
+```{r}
+# Identify quantitative variables
+quant_predictors_test <- predictors[sapply(test_data_ia[predictors], is.numeric)]
+
+# Identify qualitative variables
+qual_predictors_test <- predictors[sapply(test_data_ia[predictors], function(x) {
+  is.factor(x) || is.character(x)
+})]
+
+## Ensure the common variables in both training and test set
+
+train_vars <- setdiff(names(train_data_ia), response)
+test_vars  <- setdiff(names(test_data_ia), response)
+
+setequal(train_vars, test_vars)
+
+## Impute the test data
+cluster_vars <- quant_predictors_test
+
+cluster_data <- test_data_ia %>%
+  select(all_of(cluster_vars))
+
+# Temporary median imputation only for clustering variables
+cluster_data_temp <- cluster_data %>%
+  mutate(across(
+    everything(),
+    ~ ifelse(is.na(.x), median(.x, na.rm = TRUE), .x)
+  ))
+
+# Scale variables before clustering
+cluster_data_scaled <- scale(cluster_data_temp)
+
+```
+
+
+```{r}
+set.seed(123)
+
+k <- 6
+
+km_model <- kmeans(
+  cluster_data_scaled,
+  centers = k,
+  nstart = 25
+)
+
+test_data_ia$cluster <- factor(km_model$cluster)
+
+## Imputing values using cluster medians
+
+test_data_ia_imputed <- test_data_ia
+
+for (var in quant_predictors_test) {
+  
+  test_data_ia_imputed <- test_data_ia_imputed %>%
+    group_by(cluster) %>%
+    mutate(
+      "{var}" := ifelse(
+        is.na(.data[[var]]),
+        median(.data[[var]], na.rm = TRUE),
+        .data[[var]]
+      )
+    ) %>%
+    ungroup()
+}
+
+## Imputing clusters that may have missing values
+
+for (var in quant_predictors_test) {
+  
+  overall_median <- median(test_data_ia_imputed[[var]], na.rm = TRUE)
+  
+  test_data_ia_imputed[[var]][is.na(test_data_ia_imputed[[var]])] <- overall_median
+}
+
+# Optional: remove cluster column after imputation
+test_data_ia_imputed <- test_data_ia_imputed %>%
+  select(-cluster)
+
+test_data_ia <- test_data_ia_imputed
+
+```
+
+Upon examination, i identified that some variables had different factor levels. That is, there were new factor levels in the test data that were not found in the train data. The fundamental idea under which most machine learning techniques operate is through what the model has already learned or being trained on. As a result, any new observation or data set should have the same characteristics as the data set.
+
+```{r}
+# # Compare levels between train and test sets
+# level_comparison <- lapply(qual_predictors, function(var) {
+#   
+#   train_levels <- levels(train_data_ia[[var]])
+#   test_levels  <- levels(test_data_ia[[var]])
+#   
+#   data.frame(
+#     Variable = var,
+#     Levels_in_train_not_test = paste(setdiff(train_levels, test_levels), collapse = ", "),
+#     Levels_in_test_not_train = paste(setdiff(test_levels, train_levels), collapse = ", "),
+#     Same_levels = setequal(train_levels, test_levels)
+#   )
+# })
+# 
+# # Combine results into one data frame
+# level_comparison_df <- do.call(rbind, level_comparison)
+
+## Remove missing values from the training data only
+# The test data should keep all rows because all houses need predictions.
+train_data_clean <- na.omit(train_data_ia)
+test_data_clean  <- test_data_ia
+```
+
+
+```{r}
+## Make variable names, variable order, variable classes, and factor levels match
+## between the training and test sets before fitting/predicting.
+
+response <- "SalePrice"
+
+# Keep only predictors that are present in both train and test.
+common_predictors <- intersect(
+  setdiff(names(train_data_clean), response),
+  names(test_data_clean)
+)
+
+# Put the columns in the same order.
+train_data_clean <- train_data_clean[, c(response, common_predictors)]
+test_data_clean  <- test_data_clean[, common_predictors]
+
+# Function to calculate the statistical mode for categorical imputation.
+get_mode <- function(x) {
+  x <- x[!is.na(x)]
+  names(sort(table(x), decreasing = TRUE))[1]
+}
+
+for (var in common_predictors) {
+  
+  train_col <- train_data_clean[[var]]
+  test_col  <- test_data_clean[[var]]
+  
+  # If either data set stores the variable as categorical, treat both as factors.
+  if (is.factor(train_col) || is.character(train_col) ||
+      is.factor(test_col)  || is.character(test_col)) {
+    
+    train_chr <- as.character(train_col)
+    test_chr  <- as.character(test_col)
+    
+    # Replace missing categories with "None".
+    train_chr[is.na(train_chr)] <- "None"
+    test_chr[is.na(test_chr)]   <- "None"
+    
+    # Any category in test that was not learned in training becomes "Other".
+    train_levels_observed <- unique(train_chr)
+    unseen_test_levels <- setdiff(unique(test_chr), train_levels_observed)
+    test_chr[test_chr %in% unseen_test_levels] <- "Other"
+    
+    # Add "Other" as an allowed level so prediction will not fail.
+    final_levels <- union(train_levels_observed, "Other")
+    
+    train_data_clean[[var]] <- factor(train_chr, levels = final_levels)
+    test_data_clean[[var]]  <- factor(test_chr,  levels = final_levels)
+    
+  } else if (is.numeric(train_col)) {
+    
+    # If the training variable is numeric, force the test variable to numeric too.
+    train_data_clean[[var]] <- as.numeric(train_col)
+    test_data_clean[[var]]  <- as.numeric(test_col)
+    
+    # Impute any test NAs caused by missingness or coercion using the training median.
+    train_median <- median(train_data_clean[[var]], na.rm = TRUE)
+    test_data_clean[[var]][is.na(test_data_clean[[var]])] <- train_median
+    
+  } else {
+    
+    # For any other type, match the test variable to the training variable's class.
+    class(test_data_clean[[var]]) <- class(train_data_clean[[var]])
+  }
+}
+
+# Final check: TRUE means every predictor has the same class in train and test.
+type_check <- data.frame(
+  Variable = common_predictors,
+  Train_Class = sapply(train_data_clean[common_predictors], function(x) class(x)[1]),
+  Test_Class  = sapply(test_data_clean[common_predictors], function(x) class(x)[1]),
+  Same_Class  = sapply(common_predictors, function(var) {
+    class(train_data_clean[[var]])[1] == class(test_data_clean[[var]])[1]
+  })
+)
+
+type_check
+
+# Final factor-level check.
+common_cat_vars <- common_predictors[sapply(train_data_clean[common_predictors], is.factor)]
+```
+
+
+```{r}
+# Recheck factor levels after cleaning
+level_check_after <- lapply(common_cat_vars, function(var) {
+  
+  data.frame(
+    Variable = var,
+    Train_Levels = paste(levels(train_data_clean[[var]]), collapse = ", "),
+    Test_Levels  = paste(levels(test_data_clean[[var]]), collapse = ", "),
+    Match = identical(levels(train_data_clean[[var]]), levels(test_data_clean[[var]]))
+  )
+})
+
+level_check_after_df <- do.call(rbind, level_check_after)
+
+
+# Total missing values in the training data
+sum(is.na(train_data_clean))
+
+# Missing values by variable in train data
+colSums(is.na(train_data_clean))
+
+# Missing values by variable in test data
+colSums(is.na(test_data_clean))
+```
+
+
+
+## Prediction
+
+Random Forest was used to predict housing prices in Ames, IA after data cleaning and processing. The Random Forest is an extension of the classification trees and thus, it can build several trees for prediction. In this project, several trees were used for optimal accuracy. With 500 trees, 86 percent of the total variation was explained by the model.
+
+```{r, warning=FALSE}
+## Prediction using random forest
+
+rf_model <- randomForest(
+  SalePrice ~ .,
+  data = train_data_clean,
+  ntree = 310,
+  mtry = floor(sqrt(ncol(train_data_clean) - 1)),
+  importance = TRUE
+)
+
+plot(
+  rf_model,
+  main = "Random Forest OOB Error by Number of Trees"
+)
+
+# Determining which variables were most important in predicting SalesPrice
+varImpPlot(rf_model)
+
+# Model summary
+print(rf_model)
+
+
+```
+
+
+```{r, warning=FALSE}
+# Predictions
+rf_pred <- predict(rf_model, newdata = test_data_clean)
+rf_pred_df <- as.data.frame(rf_pred)
+
+
+# Variable importance
+#varImpPlot(rf_model)
+```
+
+
+```{r}
+## Putting predictions in the submission format
+
+rf_pred_final <- data.frame(
+  Id = test_data_clean$Id,
+  SalePrice = as.numeric(rf_pred)
+)
+
+write.csv(rf_pred_final, "house_price_pred_IA_Frank.csv", row.names = FALSE)
+```
+
