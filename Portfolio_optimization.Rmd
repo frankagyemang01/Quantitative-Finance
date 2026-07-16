@@ -1,0 +1,146 @@
+---
+title: "Portfolio_Optimization"
+author: Frank Agyemang, Dr. Blaine Johnson, Dr. Allan Fritz, Addy Carrol, Dr. Reka
+  Howard
+date: "2026-06-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Portfolio optimization
+
+This project simulates data to determine risk and return of a hypothetical portfolio in R.
+
+```{r, warning=FALSE,echo=FALSE}
+library(plotly)
+library(dplyr)
+```
+
+
+```{r}
+# Suppress warnings
+options(warn = -1)
+
+# Set parameters
+n_assets <- 5
+n_simulation <- 500
+
+# Generate random returns matrix
+returns <- matrix(
+  rnorm(n_assets * n_simulation),
+  nrow = n_assets,
+  ncol = n_simulation
+)
+
+
+```
+
+Random weights are generated. In portfolio optimization, the goal is to allocated limited resources in a way that maximizes returns. Weights represents the percentage or proportion of resources that is being allocated to each asset in the portfolio. In our simulation, we have a rate of return of $-0.8$ percent and a $48.5$ percent portfolio risk. That is, we stand a $48.5$ percent chance to lose about $0.8$ percent of our investment.
+
+```{r}
+## Creating a function that calculates returns for each stock 
+## In the portfolio
+
+# Generate random weights
+rand <- runif(n_assets)
+
+# Normalize weights so they add up to 1
+weights <- rand / sum(rand)
+
+port_return <- function(returns) {
+  
+  # Mean return for each asset
+  rets <- rowMeans(returns)
+  
+  # Covariance matrix of asset returns
+  cov_matrix <- cov(t(returns))
+  
+  # Portfolio return
+  portfolio_returns <- sum(weights * rets)
+  
+  # Portfolio standard deviation
+  portfolio_std_dev <- sqrt(
+    t(weights) %*% cov_matrix %*% weights
+  )
+  
+  return(list(
+    portfolio_returns = portfolio_returns,
+    portfolio_std_dev = portfolio_std_dev
+  ))
+}
+
+# Run the function
+result <- port_return(returns)
+
+portfolio_returns <- result$portfolio_returns
+portfolio_std_dev <- result$portfolio_std_dev
+
+```
+
+We fit a regression of standard deviation and return. The objective is to show that both risk(shown by standard deviation) and return go hand in hand. Nevertheless, the magnitude of this association depends on the assets or stocks we may have in our portfolio.
+
+```{r}
+
+# Create portfolio simulation for i = 1 to 100
+portfolio <- t(sapply(1:100, function(i) {
+  port_return(matrix(rnorm(n_assets * i), nrow = n_assets, ncol = i))
+}))
+
+# Convert to data frame
+portfolio_df <- as.data.frame(portfolio)
+
+# Renaming variables in the data frame
+portfolio_df <- portfolio_df %>%
+  rename(Return = portfolio_returns)
+portfolio_df <- portfolio_df %>%
+  rename(Standard_Deviation = portfolio_std_dev)
+
+# Changing variable type to numeric
+portfolio_df$Return <- as.numeric(portfolio_df$Return)
+portfolio_df$Standard_Deviation <- as.numeric(portfolio_df$Standard_Deviation)
+
+# Keep only rows with no missing values for the regression
+valid_rows <- complete.cases(portfolio_df[, c("Return", "Standard_Deviation")])
+
+# Fit model only on valid rows
+model <- lm(Standard_Deviation ~ Return, data = portfolio_df[valid_rows, ])
+
+# Create Best_Fit column with NA first
+portfolio_df$Best_Fit <- NA_real_
+
+# Put fitted values only in the valid rows
+portfolio_df$Best_Fit[valid_rows] <- fitted(model)
+
+# Plot risk-return relationship
+fig <- plot_ly() %>%
+  add_trace(
+    data = portfolio_df,
+    x = ~Return,
+    y = ~Standard_Deviation,
+    type = "scatter",
+    mode = "markers",
+    name = "Risk-Return Relationship"
+  ) %>%
+  add_trace(
+    data = portfolio_df,
+    x = ~Return,
+    y = ~Best_Fit,
+    type = "scatter",
+    mode = "lines",
+    name = "Best Fit Line"
+  ) %>%
+  layout(
+    xaxis = list(title = "Return"),
+    yaxis = list(title = "Standard Deviation"),
+    width = 900,
+    height = 470
+  )
+
+fig
+```
+
+
+
