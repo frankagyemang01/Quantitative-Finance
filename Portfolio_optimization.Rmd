@@ -1,13 +1,11 @@
 ---
-title: "Portfolio_Optimization"
-<<<<<<< HEAD
-author: Frank Agyemang, Dr. Blaine Johnson, Dr. Allan Fritz, Addy Carrol, Dr. Reka
-  Howard
-=======
-author: Frank Agyemang
->>>>>>> 871ec4b (Value at Risk, Mean and Variance of stock returns, Eigen values and vectors and interpretations)
+title: "Portfolio_Optimization_Simulated_Data"
+author: "Frank Agyemang"
 date: "2026-06-27"
-output: html_document
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -39,9 +37,7 @@ returns <- matrix(
   ncol = n_simulation
 )
 
-<<<<<<< HEAD
 
-=======
 # Simulated returns on stocks
 stock_ret <- as.data.frame(t(returns))
 ```
@@ -74,9 +70,10 @@ VaR_s5 <- 1000 * -1.704949
 
 
 ```{r}
+
 # Finding the eigen value and eigen vector using the covariance matrix
 eigen_decomp <- eigen(cov_matrix)
-eigen_decomp$values    # the eigenvalues (variances along principal directions)
+eigen_decomp$values    
 eigen_decomp$vectors
 
 # Sum eigen values
@@ -87,7 +84,6 @@ prop_var <- eigen_decomp$values / sum(eigen_decomp$values)
 print(prop_var)
 
 # nb: all are greater or equal to 0
->>>>>>> 871ec4b (Value at Risk, Mean and Variance of stock returns, Eigen values and vectors and interpretations)
 ```
 
 Random weights are generated. In portfolio optimization, the goal is to allocated limited resources in a way that maximizes returns. Weights represents the percentage or proportion of resources that is being allocated to each asset in the portfolio. In our simulation, we have a rate of return of $-0.8$ percent and a $48.5$ percent portfolio risk. That is, we stand a $48.5$ percent chance to lose about $0.8$ percent of our investment.
