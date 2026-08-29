@@ -19,6 +19,10 @@ This project simulates data to determine risk and return of a hypothetical portf
 ```{r, warning=FALSE,echo=FALSE}
 library(plotly)
 library(dplyr)
+library(quantmod)
+library(ggplot2)
+library(forecast)
+
 ```
 
 
@@ -191,4 +195,123 @@ fig
 ```
 
 
+## Time Series
+
+```{r}
+# =====================================================================
+# Pull Apple (AAPL) closing price + date from Yahoo Finance and plot
+# =====================================================================
+
+
+#  Pull data 
+getSymbols("AAPL", src = "yahoo",
+           from = "2015-01-01", to = Sys.Date(),
+           auto.assign = TRUE)          # creates an xts object called AAPL
+
+#  Pull out just Date and Close as a plain data frame 
+# Cl() grabs the Close column regardless of exact colname
+aapl_df <- data.frame(
+  Date  = index(AAPL),
+  Close = as.numeric(Cl(AAPL))         
+)
+
+
+
+#  Base R version (quantmod's own chart function) 
+chartSeries(AAPL, TA = NULL, name = "AAPL Closing Price")
+
+#  ggplot2 time series plot 
+ggplot(aapl_df, aes(x = Date, y = Close)) +
+  geom_line(color = "steelblue") +
+  labs(title = "Apple (AAPL) Closing Price", x = "Date", y = "Close ($)") +
+  theme_minimal(base_size = 13)
+
+#  Save the plot 
+dir.create("images", showWarnings = FALSE)
+ggsave("images/AAPL_Close.png", width = 10, height = 6, dpi = 100)
+```
+
+
+```{r}
+## Get the components of time series
+
+#  Pull data 
+getSymbols("AAPL", src = "yahoo",
+           from = "2015-01-01", to = Sys.Date(),
+           auto.assign = TRUE)
+AAPL_monthly <- to.monthly(AAPL, indexAt = "firstof", OHLC = FALSE)
+
+# monthly closing price, still an xts object
+aapl_close <- Cl(AAPL_monthly)     
+
+#  Convert to a ts() object with monthly frequency (period = 12) 
+aapl_ts <- ts(as.numeric(aapl_close),
+            start = c(2015, 1),
+            frequency = 12)
+
+#  Decompose - additive is closest to statsmodels' default 
+decomp <- decompose(aapl_ts, type = "additive")
+
+#  Plot all four panels (observed, trend, seasonal, random) 
+dir.create("images", showWarnings = FALSE)
+png("images/decomposition.png", width = 1000, height = 700, res = 100)
+plot(decomp)
+```
+
+
+```{r}
+# Time series components (visualization)
+# =====================================================================
+# R equivalent: pull ^GSPC monthly close from Yahoo Finance and
+# decompose into trend, seasonal, and remainder components
+# =====================================================================
+
+
+# Pull daily data, then convert to monthly (yfinance's interval='1mo')
+getSymbols("^GSPC", src = "yahoo",
+           from = as.Date("2015-01-01"), to = as.Date("2021-01-01"),
+           auto.assign = TRUE)
+
+GSPC_monthly <- to.monthly(GSPC, indexAt = "firstof", OHLC = FALSE)
+
+# monthly closing price, still an xts object
+sp_close <- Cl(GSPC_monthly)     
+
+#  Convert to a ts() object with monthly frequency (period = 12) 
+sp_ts <- ts(as.numeric(sp_close),
+            start = c(2015, 1),
+            frequency = 12)
+
+#  Decompose - additive is closest to statsmodels' default 
+decomp <- decompose(sp_ts, type = "additive")
+
+#  Plot all four panels (observed, trend, seasonal, random) 
+dir.create("images", showWarnings = FALSE)
+png("images/decomposition.png", width = 1000, height = 700, res = 100)
+plot(decomp)
+
+
+  
+```
+
+
+
+```{r}
+
+## Auto correlation function
+p <- ggAcf(aapl_ts, lag.max = 30) +
+  xlab("Number of Lags") +
+  ggtitle(NULL)
+
+ggsave("images/acf_SP.png", plot = p)
+print(p)
+
+## Partial ACF
+p1 <- ggPacf(aapl_ts, lag.max = 30) +
+  xlab("Number of Lags") +
+  ggtitle(NULL)
+
+ggsave("images/pacf_SP.png", plot = p)
+print(p1)
+```
 

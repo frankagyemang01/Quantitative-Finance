@@ -1,0 +1,303 @@
+---
+title: "Investing_3001"
+author: "Frank Agyemang"
+date: "2026-08-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Tracking returns of stocks that i lost money in for the past year
+
+In my experience of investing, selecting the right stocks for either long term or short term is very difficult. Nevertheless, there are records of individuals who have built successful strategies to investing. Reading about some of these individuals and through my extensive knowledge in Economics and Financial Markets, i believe there are laid out rules that may maximize an investor's return.I have broken down this into steps.
+
+1. Scan stocks to determine those that have earning potential (this depends on an investor's strategy). For the average investor and trader, we look for stocks that are performing well in the market. Other traders may look for stocks that may have the potential to do bad and trade on the Options (Put Options) market. Thus, a way to scan stocks is by looking at the returns of the stocks. NB:(If you are seeking to trade during the week, look at weekly data, monthly for monthly investment, yearly data for long term data  etc...) and select preferred stocks.
+
+2. Read about the stocks and their underlying (what tangible goods actually support the stock) and how are those goods performing on the market (This serves as a confirmation step of previously selected stocks)
+
+3. Portfolio Optimization (codes provided for statistical analysis)
+
+4. Observe the stock performance for the day to validate the strategy before investing the next day. For long term investments, you want a portfolio of independent stocks. 
+
+5. These steps help with entry of the market and exit strategies
+
+```{r, warning=FALSE, echo=FALSE}
+## Loading required libraries
+library(quantmod)
+#library(tidyquant)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(PerformanceAnalytics)
+library(xts)
+library(zoo)
+library(mFilter)
+library(forecast)
+library(gridExtra)
+library(tseries)
+```
+
+
+## Stock Return Analysis: Fetch, Compute Returns, Plot, Decompose (Biotech & Pharma)
+VRPX (Virpax), WINT (Windtree), LGMK (LogicMark), INO (Inovio), SYRA (Syra Health), IOVA (Iovance), MYNZ (Mainz Biomed), SPRC (SciSparc), STSS (Sharps Technology), XLO (Xilio), VNRX (VolitionRx), KNW (Know Labs), PTN (Palatin), IPA (ImmunoPrecise), ADGM (Adagene), GNS (Genenta Science), MODD (Modular Medical), CTXR (Citius), AMLX (Amylyx), TIL (Instil Bio), ACON (Aclarion), MTNB (Matinas BioPharma), GLYC (GlycoMimetics), EONR (Eterna Therapeutics), ICCT (iCoreConnect — health-tech/software), TTOO/"TIOO" (likely T2 Biosystems)
+
+```{r}
+## Define tickers and date range 
+
+# tickers <- c("VRPX", "WINT", "LGMK", "INO", "SYRA", "IOVA", "SPRC",
+#              "XLO", "VNRX", "PTN", "ADGM", "GNS", "MODD", "CTXR",
+#              "AMLX", "TIL", "ACON", "MTNB", "EONR", "TTOO" ) 
+# start_date <- "2025-03-01"
+# end_date   <- Sys.Date()
+
+#Stocks with upward trend
+tickers <- c( "WINT", "INO", "SYRA", "IOVA", "SPRC",
+              "CTXR","AMLX", "TIL" )
+
+
+start_date <- "2024-08-01"
+end_date   <- Sys.Date()
+
+```
+
+
+```{r, warning=FALSE}
+##  Download price data (robust version)
+safe_getSymbols <- function(ticker) {
+  tryCatch({
+    getSymbols(ticker, src = "yahoo", from = start_date, to = end_date, auto.assign = FALSE)
+  }, error = function(e) {
+    message("Failed to download: ", ticker, " -- ", conditionMessage(e))
+    NULL
+  })
+}
+
+price_data <- lapply(tickers, safe_getSymbols)
+names(price_data) <- tickers
+
+# Drop tickers that failed
+failed_tickers <- names(price_data)[sapply(price_data, is.null)]
+if (length(failed_tickers) > 0) {
+  message("Skipped (failed to download): ", paste(failed_tickers, collapse = ", "))
+}
+price_data <- price_data[!sapply(price_data, is.null)]
+tickers <- names(price_data)  # update tickers to only the successful ones
+
+price_list <- lapply(price_data, Ad)
+prices <- do.call(merge, price_list)
+colnames(prices) <- tickers
+```
+
+
+```{r}
+## Plotting times series for stock prices
+prices_df <- prices %>%
+  fortify.zoo() %>%          # converts xts to data frame with a Date column
+  rename(Date = Index) %>%
+  pivot_longer(-Date, names_to = "Ticker", values_to = "Price")
+
+daily_ret0 <- ggplot(prices_df, aes(x = Date, y = Price, color = Ticker)) +
+  geom_line(alpha = 0.8, linewidth = 0.4) +
+  labs(title = "Daily Closing Prices",
+       subtitle = paste(tickers, collapse = ", "),
+       x = "Date", y = "Closing Prices") +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+# Save Plot
+ggsave(filename = "Daily Returns Pharma.png",
+       plot = daily_ret0,
+       width = 8,
+       height = 6,units = "in", dpi = 300)
+```
+
+
+
+
+
+```{r}
+## Calculate daily returns
+# Log returns (Used here)
+returns_log <- na.omit(Return.calculate(prices, method = "log"))
+
+## Superimposed time series plot of returns 
+returns_df <- returns_log %>%
+  fortify.zoo() %>%          # converts xts to data frame with a Date column
+  rename(Date = Index) %>%
+  pivot_longer(-Date, names_to = "Ticker", values_to = "Return")
+
+daily_ret <- ggplot(returns_df, aes(x = Date, y = Return, color = Ticker)) +
+  geom_line(alpha = 0.8, linewidth = 0.4) +
+  labs(title = "Daily Log Returns",
+       subtitle = paste(tickers, collapse = ", "),
+       x = "Date", y = "Log Return") +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+# Save Plot
+ggsave(filename = "Daily Returns.png",
+       plot = daily_ret,
+       width = 8,
+       height = 6,units = "in", dpi = 300)
+```
+
+
+```{r}
+##  Decomposition: trend, seasonality, cyclicality, residual  
+##   This requires the `mFilter` package
+
+decompose_stock <- function(ret_xts, ticker, frequency = 21) {
+  # frequency = 21 treats a trading month as the "seasonal" period;
+  # use 5 for a trading week, or 252 for an annual cycle instead.
+  ts_data <- ts(as.numeric(ret_xts), frequency = frequency)
+
+  stl_fit <- stl(ts_data, s.window = "periodic", robust = TRUE)
+  comp <- as.data.frame(stl_fit$time.series)  # seasonal, trend, remainder 
+  # Further split the STL trend into long-run trend + cycle via HP filter
+  hp_fit <- hpfilter(comp$trend, freq = 14400)  # 14400 is a common daily-data lambda
+  comp$long_run_trend <- as.numeric(hp_fit$trend)
+  comp$cycle          <- as.numeric(hp_fit$cycle)
+
+  comp$Date   <- index(ret_xts)
+  comp$Ticker <- ticker
+  comp
+}
+```
+
+
+
+```{r}
+decomp_list <- lapply(tickers, function(t) decompose_stock(returns_log [, t], t))
+decomp_all  <- bind_rows(decomp_list)
+```
+
+
+```{r}
+##  Plot each stock's decomposition 
+plot_decomposition <- function(df, ticker) {
+  df_long <- df %>%
+    filter(Ticker == ticker) %>%
+    select(Date, seasonal, long_run_trend, cycle, remainder) %>%
+    rename(Trend = long_run_trend, Seasonal = seasonal,
+           Cyclical = cycle, Residual = remainder) %>%
+    pivot_longer(-Date, names_to = "Component", values_to = "Value")
+
+  ggplot(df_long, aes(x = Date, y = Value)) +
+    geom_line(color = "steelblue", linewidth = 0.4) +
+    facet_wrap(~ Component, scales = "free_y", ncol = 1) +
+    labs(title = paste("Decomposition of Daily Returns:", ticker),
+         x = "Date", y = NULL) +
+    theme_minimal()
+}
+
+# Example: plot decomposition for each ticker
+for (t in tickers) {
+  print(plot_decomposition(decomp_all, t))
+}
+
+##  (Optional) Save plots to files
+ggsave("returns_superimposed.png", width = 10, height = 6)
+ for (t in tickers) {
+  ggsave(paste0("decomp_", t, ".png"), plot = plot_decomposition(decomp_all, t),
+          width = 8, height = 8)
+}
+```
+
+```{r}
+## Get ACF for all stocks in BioPharma
+## Individual ACF plots using ggplot2 (nicer styling)
+acf_plot_list <- lapply(colnames(prices), function(t) {
+  ggPacf(as.numeric(prices[, t]), lag.max = 30) +
+    ggtitle(t) +
+    theme_minimal()
+})
+ 
+acf_plot_list[[1]]
+```
+
+```{r, warning=FALSE}
+# Test for stationarity
+
+## ---- Loop across all stocks in `returns` (or `prices`) ----
+for (t in colnames(returns_log)) {
+  result <- adf.test(as.numeric(na.omit(returns_log[, t])))
+  cat(sprintf("%-6s  ADF stat: %.4f   p-value: %.4f   %s\n",
+              t, result$statistic, result$p.value,
+              ifelse(result$p.value < 0.05, "-> Stationary", "-> Non-stationary")))
+}
+```
+
+
+## Portfolio Optimization
+
+```{r}
+# rf: risk-free rate (per period, same frequency as returns)
+
+mu <- colMeans(returns_log)          # expected returns vector
+Sigma <- cov(returns_log)            # covariance matrix
+Sigma
+n <- ncol(returns_log)
+ones <- rep(1, n)
+
+# Inverse matrix: Fails if assets are highly correlated
+Sigma_inv <- solve(Sigma)
+Sigma_inv
+```
+
+
+```{r}
+# Portfolio with the lowest possible variance
+w_gmv <- (Sigma_inv %*% ones) / as.numeric(t(ones) %*% Sigma_inv %*% ones)
+# optimal weights for lowest risk 
+w_gmv
+# Ensure weight sum to 1
+sum(w_gmv)
+# Returns using these weights
+gmv_return <- as.numeric(t(w_gmv) %*% mu)
+# standard deviation of returns using the optimal weights
+gmv_sd <- sqrt(as.numeric(t(w_gmv) %*% Sigma %*% w_gmv))
+```
+
+
+```{r}
+# ---- Tangency Portfolio (Max Sharpe Ratio) ---- 
+excess_mu <- mu - rf
+w_tan <- (Sigma_inv %*% excess_mu) / as.numeric(t(ones) %*% Sigma_inv %*% excess_mu)
+tan_return <- as.numeric(t(w_tan) %*% mu)
+tan_sd <- sqrt(as.numeric(t(w_tan) %*% Sigma %*% w_tan))
+sharpe_tan <- (tan_return - rf) / tan_sd
+
+cat("GMV weights:\n"); print(round(w_gmv, 4))
+cat("GMV return:", gmv_return, " GMV sd:", gmv_sd, "\n\n")
+
+cat("Tangency weights:\n"); print(round(w_tan, 4))
+cat("Tangency return:", tan_return, " Tangency sd:", tan_sd, " Sharpe:", sharpe_tan, "\n")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
