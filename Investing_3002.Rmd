@@ -27,7 +27,7 @@ In my experience of investing, selecting the right stocks for either long term o
 ```{r, warning=FALSE, echo=FALSE}
 ## Loading required libraries
 library(quantmod)
-library(tidyquant)
+#library(tidyquant)
 library(tidyr)
 library(dplyr)
 library(ggplot2)
